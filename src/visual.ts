@@ -132,12 +132,14 @@ module powerbi.extensibility.visual {
             return res;
         }
 
-        private getCategoryByDataRole(dataCategories: DataViewCategoryColumn[], dataRole: string): string[] {
+        private getCategoryByDataRole(dataCategories: DataViewCategoryColumn[], dataRole: string): string[][] {
             const categories: DataViewCategoryColumn[] = dataCategories
                 .filter((c: DataViewCategoryColumn) => c.source.roles[dataRole]);
 
             if (categories.length >= 1) {
-                return categories[0].values as string[];
+                return categories.map((category: DataViewCategoryColumn) => {
+                    return category.values as string[];
+                });
             } else {
                 return undefined;
             }
@@ -440,15 +442,25 @@ module powerbi.extensibility.visual {
             const categories: DataViewCategoryColumn[] = this.getCategories(dataView);
             const category: DataViewCategoryColumn = categories[0];
 
-            const names: string[] = this.getCategoryByDataRole(categories, "category");
+            const names: string[][] = this.getCategoryByDataRole(categories, "category");
+
             const values: number[] = this.getValuesFromDataViews(dataView) as number[];
 
-            const imageUrls: string[] = this.getCategoryByDataRole(categories, "image");
+            const imageUrlAllCategories: string[][] = this.getCategoryByDataRole(categories, "image");
+            let imageUrls: string[];
+            if (imageUrlAllCategories) {
+                imageUrls = imageUrlAllCategories.pop();
+            }
+
             const categoricalValues: DataViewValueColumns = dataView.categorical.values;
-            const hyperlinks: string[] = this.getCategoryByDataRole(categories, "hyperlink");
+            const hyperlinksAllCategories: string[][] = this.getCategoryByDataRole(categories, "hyperlink");
+
+            let hyperlinks: string[];
+            if (imageUrlAllCategories) {
+                hyperlinks = hyperlinksAllCategories.pop();
+            }
 
             let dataPoints: DataPoint[] = [];
-            const flatDataPoints: DataPoint[] = [];
             const groups: DataViewValueColumnGroup[] = this.getGroupsFromDataViews(options.dataViews[0]);
             let isHighlighted: boolean;
             let isGrouped: boolean;
@@ -460,7 +472,9 @@ module powerbi.extensibility.visual {
                 const highlights: number[] = this.getHighlights(options.dataViews[0]) as number[];
 
                 isHighlighted = !!highlights.length;
-                dataPoints = this.getCategoryDataPoints(category, values, names, highlights, categoricalValues, imageUrls, hyperlinks);
+
+                dataPoints = this.getCategoryDataPoints(categories, values, names, highlights, categoricalValues, imageUrls, hyperlinks);
+                debugger;
             } else {
                 isGrouped = true;
 
@@ -470,7 +484,7 @@ module powerbi.extensibility.visual {
 
                 dataPoints = groups.map((group: DataViewValueColumnGroup, idx: number) => {
                     const groupDataPoint: DataPoint = this.getGroupDataPoint(
-                        category,
+                        categories,
                         group,
                         categoricalValues,
                         names,
@@ -511,9 +525,9 @@ module powerbi.extensibility.visual {
         }
 
         private getCategoryDataPoints(
-            category: DataViewCategoryColumn,
+            categories: DataViewCategoryColumn[],
             values: number[],
-            names: string[],
+            names: string[][],
             highlights: number[],
             categoricalValues?: DataViewValueColumns,
             imageUrls?: string[],
@@ -521,105 +535,143 @@ module powerbi.extensibility.visual {
             group?: DataViewValueColumnGroup,
             parentDataPoint?: DataPoint
         ): DataPoint[] {
-            const dataPoints: DataPoint[] = [];
+            let dataPoints: DataPoint[] = [];
+            let curDataPoints: DataPoint[];
+            const revNames: string[][] = names.reverse();
+            let curNames: string[];
+            let dataPointsHash: { [key: string]: DataPoint };
 
-            names.forEach((name: string, idx: number) => {
+            categories.reverse()
+                .forEach((curCategory: DataViewCategoryColumn, catIdx: number) => {
+                    curNames = revNames[catIdx];
+                    const isBottomCategory: boolean = (catIdx === 0);
 
-                const numericValue: number = this.getFilteredValue(values[idx]);
+                    dataPointsHash = Object.create(null);
 
-                if (numericValue === null) {
-                    return;
-                }
-                if (!name) {
-                    return;
-                }
+                    curDataPoints = [];
+                    debugger;
+                    curNames.forEach((name: string, idx: number) => {
 
-                const value: string = `${numericValue}`;
-                let imageUrl: string = (imageUrls) ? imageUrls[idx] : "";
-                let hyperlink: string = (hyperlinks) ? hyperlinks[idx] : "";
-                let selectionId: visuals.ISelectionId;
-                let tooltipInfo: VisualTooltipDataItem[] = [];
+                        if (dataPointsHash[name]) {
+                            dataPointsHash[name].children.push(dataPoints[idx]);
 
-                let childSelectionId: visuals.ISelectionId = this.host.createSelectionIdBuilder()
-                    .withCategory(category, idx)
-                    .createSelectionId();
-
-                if (categoricalValues !== undefined
-                    && group !== undefined) {
-                    selectionId = this.host.createSelectionIdBuilder()
-                        .withCategory(category, idx)
-                        .withSeries(categoricalValues, group)
-                        .createSelectionId();
-
-                    tooltipInfo = [
-                        {
-                            displayName: this.groupingColumnName,
-                            value: group.name
-                        },
-                        {
-                            displayName: this.categoryColumnName,
-                            value: name
-                        },
-                        {
-                            displayName: this.measureColumnName,
-                            value
+                            curDataPoints.push(dataPointsHash[name]);
                         }
-                    ] as VisualTooltipDataItem[];
-                } else if (this.measureColumnName !== undefined) {
-                    selectionId = childSelectionId;
+                        let numericValue: number =  this.getFilteredValue(values[idx]);
 
-                    tooltipInfo = [
-                        {
-                            displayName: this.categoryColumnName,
-                            value: name
-                        },
-                        {
-                            displayName: this.measureColumnName,
-                            value
+                        if (numericValue === null && isBottomCategory) {
+                            return;
                         }
-                    ] as VisualTooltipDataItem[];
-                } else {
-                    selectionId = childSelectionId;
-                    tooltipInfo = [
-                        {
-                            displayName: this.categoryColumnName,
-                            value: name
+                        if (!name) {
+                            return;
                         }
-                    ] as VisualTooltipDataItem[];
+
+                        const value: string = `${numericValue}`;
+                        let imageUrl: string = (imageUrls) ? imageUrls[idx] : "";
+                        let hyperlink: string = (hyperlinks) ? hyperlinks[idx] : "";
+                        let selectionId: visuals.ISelectionId;
+                        let tooltipInfo: VisualTooltipDataItem[] = [];
+
+                        let childSelectionId: visuals.ISelectionId = this.host.createSelectionIdBuilder()
+                            .withCategory(curCategory, idx)
+                            .createSelectionId();
+
+                        if (categoricalValues !== undefined
+                            && group !== undefined) {
+                            selectionId = this.host.createSelectionIdBuilder()
+                                .withCategory(curCategory, idx)
+                                .withSeries(categoricalValues, group)
+                                .createSelectionId();
+
+                            tooltipInfo = [
+                                {
+                                    displayName: this.groupingColumnName,
+                                    value: group.name
+                                },
+                                {
+                                    displayName: this.categoryColumnName,
+                                    value: name
+                                },
+                                {
+                                    displayName: this.measureColumnName,
+                                    value
+                                }
+                            ] as VisualTooltipDataItem[];
+                        } else if (this.measureColumnName !== undefined) {
+                            selectionId = childSelectionId;
+
+                            tooltipInfo = [
+                                {
+                                    displayName: this.categoryColumnName,
+                                    value: name
+                                },
+                                {
+                                    displayName: this.measureColumnName,
+                                    value
+                                }
+                            ] as VisualTooltipDataItem[];
+                        } else {
+                            selectionId = childSelectionId;
+                            tooltipInfo = [
+                                {
+                                    displayName: this.categoryColumnName,
+                                    value: name
+                                }
+                            ] as VisualTooltipDataItem[];
+                        }
+
+                        const fill: string = this.getCategoricalObjectValue<Fill>(
+                            curCategory,
+                            idx,
+                            "dataPointColor",
+                            "fill",
+                            { solid: { color: this.getBubbleColor(name) } }
+                        ).solid.color;
+
+                        let dataPoint = {
+                            highlighted: highlights[idx] !== null,
+                            name,
+                            value: numericValue,
+                            fill,
+                            selectionId,
+                            childSelectionId,
+                            tooltipInfo,
+                            imageUrl,
+                            hyperlink,
+                            parent: parentDataPoint
+                        } as DataPoint;
+
+                        if (!isBottomCategory) {
+                            dataPoint.children = [dataPoints[idx]];
+                        }
+
+                        curDataPoints.push(dataPoint);
+                        dataPointsHash[name] = dataPoint;
+                    });
+
+                    dataPoints = curDataPoints.slice();
+                });
+
+            dataPointsHash = Object.create(null);
+
+            dataPoints.forEach((d: DataPoint) => {
+                if (!dataPointsHash[d.name]) {
+                    dataPointsHash[d.name] = d;
                 }
-
-                const fill: string = this.getCategoricalObjectValue<Fill>(
-                    category,
-                    idx,
-                    "dataPointColor",
-                    "fill",
-                    { solid: { color: this.getBubbleColor(name) } }
-                ).solid.color;
-
-                let dataPoint = {
-                    highlighted: highlights[idx] !== null,
-                    name,
-                    value: numericValue,
-                    fill,
-                    selectionId,
-                    childSelectionId,
-                    tooltipInfo,
-                    imageUrl,
-                    hyperlink,
-                    parent: parentDataPoint
-                } as DataPoint;
-
-                dataPoints.push(dataPoint);
             });
+            dataPoints = [];
+            for (var key in dataPointsHash) {
+                dataPoints.push(dataPointsHash[key]);
+            }
 
             return dataPoints;
         }
 
         private getGroupDataPoint(
-            category: DataViewCategoryColumn,
+            categories: DataViewCategoryColumn[],
             group: DataViewValueColumnGroup,
             categoricalValues: DataViewValueColumns,
-            names: string[],
+            names: string[][],
             highlights: number[],
             imageUrls?: string[],
             hyperlinks?: string[],
@@ -654,7 +706,7 @@ module powerbi.extensibility.visual {
             } as DataPoint;
 
             dataPoint.children = this.getCategoryDataPoints(
-                category,
+                categories,
                 group.values[0].values as number[],
                 names,
                 highlights,
@@ -1025,18 +1077,21 @@ module powerbi.extensibility.visual {
             if (!options) {
                 return;
             }
+            try {
+                this.getColumnNames(options.dataViews[0]);
+                console.log(options)
+                this.data = this.convertData(options);
 
-            this.getColumnNames(options.dataViews[0]);
+                const legendMargins: IViewport = this.renderLegend(this.data, options.viewport);
 
-            this.data = this.convertData(options);
-
-            const legendMargins: IViewport = this.renderLegend(this.data, options.viewport);
-
-            this.render(
-                this.data,
-                options.viewport,
-                legendMargins,
-                (this.legend) ? this.legend.getOrientation() : null);
+                this.render(
+                    this.data,
+                    options.viewport,
+                    legendMargins,
+                    (this.legend) ? this.legend.getOrientation() : null);
+            } catch (e) {
+                console.log(e)
+            }
         }
 
         private getColumnNames(dataView: DataView) {

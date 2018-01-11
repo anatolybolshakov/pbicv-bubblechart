@@ -277,5 +277,10 @@
             }
         }
     ],
-    "supportsHighlight": true
+    "supportsHighlight": true,
+    "drilldown": {
+        "roles": [
+            "category"
+        ]
+    }
 }
